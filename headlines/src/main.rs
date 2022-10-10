@@ -1,5 +1,3 @@
-mod headlines;
-
 use eframe::egui::Vec2;
 use eframe::{NativeOptions, run_native};
 use headlines::Headlines;

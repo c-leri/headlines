@@ -1,17 +1,18 @@
-use std::borrow::Cow;
 use std::sync::mpsc::{channel, Receiver, Sender, sync_channel, SyncSender};
 #[cfg(not(target_arch = "wasm32"))]
 use std::thread;
-use eframe::egui::{Button, CentralPanel, Color32, CtxRef, FontDefinitions, FontFamily, Hyperlink, Key, Label, Layout, menu, ScrollArea, Separator, TextStyle, TopBottomPanel, Ui, Visuals, Window};
-use eframe::epi::{App, Frame, Storage};
+use eframe::egui::{Align, Button, CentralPanel, Color32, Context, FontData, FontDefinitions, FontFamily, Hyperlink, Key, Label, Layout, menu, RichText, ScrollArea, Separator, TextStyle, TopBottomPanel, Ui, Visuals, Window};
+use eframe::{App, CreationContext, Frame, Storage};
 use serde::{Serialize, Deserialize};
-use newsapi::NewsAPI;
+use newsapi::{NewsAPI, NewsAPIResponse};
 
 const PADDING: f32 = 5.;
 const WHITE: Color32 = Color32::from_rgb(255, 255, 255);
 const BLACK: Color32 = Color32::from_rgb(0,0,0);
 const CYAN: Color32 = Color32::from_rgb(0, 255, 255);
 const RED: Color32 = Color32::from_rgb(255,0,0);
+
+const APP_NAME: &str = "headlines";
 
 enum Msg
 {
@@ -68,29 +69,18 @@ impl Headlines
         }
     }
 
-    fn configure_fonts(&self, ctx: &CtxRef)
+    fn configure_fonts(&self, ctx: &Context)
     {
         let mut font_def = FontDefinitions::default();
 
         font_def.font_data.insert
         (
             "MesloLGS".to_string(),
-            Cow::Borrowed(include_bytes!("../../MesloLGS-NF-Regular.ttf"))
+            FontData::from_static(include_bytes!("../../MesloLGS-NF-Regular.ttf"))
         );
 
-        font_def.family_and_size.insert
-        (
-            TextStyle::Heading,
-            (FontFamily::Proportional, 35.)
-        );
-
-        font_def.family_and_size.insert
-        (
-            TextStyle::Body,
-            (FontFamily::Proportional, 20.)
-        );
-
-        font_def.fonts_for_family
+        font_def
+            .families
             .get_mut(&FontFamily::Proportional)
             .unwrap()
             .insert(0, "MesloLGS".to_string());
@@ -121,15 +111,15 @@ impl Headlines
 
                 // desc
                 ui.add_space(PADDING);
-                let desc = Label::new(&a.desc).text_style(TextStyle::Button);
+                let desc = Label::new(RichText::new(&a.desc).text_style(TextStyle::Button));
                 ui.add(desc);
 
                 // links
                 if self.config.dark_mode
                 { ui.style_mut().visuals.hyperlink_color = CYAN; } else { ui.style_mut().visuals.hyperlink_color = RED; }
                 ui.add_space(PADDING);
-                ui.with_layout(Layout::right_to_left(), |ui| {
-                    ui.add(Hyperlink::new(&a.url).text("read more ⤴"));
+                ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                    ui.add(Hyperlink::from_label_and_url("read more ⤴", &a.url));
                 });
 
                 ui.add_space(PADDING);
@@ -138,7 +128,7 @@ impl Headlines
         }
     }
 
-    fn render_top_panel(&mut self, ctx: &CtxRef, _frame: &mut Frame<'_>)
+    fn render_top_panel(&mut self, ctx: &Context, _frame: &mut Frame)
     {
         TopBottomPanel::top("top_panel").show(ctx,
             |ui|
@@ -148,23 +138,23 @@ impl Headlines
                     |ui|
                     {
                         // logo
-                        ui.with_layout(Layout::left_to_right(),
-                            |ui| { ui.add(Label::new("📓").text_style(TextStyle::Heading)); }
+                        ui.with_layout(Layout::left_to_right(Align::Min),
+                            |ui| { ui.add(Label::new(RichText::new("📓").text_style(TextStyle::Heading))); }
                         );
 
                         // controls
-                        ui.with_layout(Layout::right_to_left(),
+                        ui.with_layout(Layout::right_to_left(Align::Min),
                             |ui|
                             {
                                 #[cfg(not(target_arch = "wasm32"))]
-                                let close_btn = ui.add(Button::new("❌").text_style(TextStyle::Body));
+                                let close_btn = ui.add(Button::new(RichText::new("❌").text_style(TextStyle::Body)));
                                 #[cfg(not(target_arch = "wasm32"))]
                                 if close_btn.clicked()
                                 {
-                                    _frame.quit();
+                                    _frame.close();
                                 }
 
-                                let refresh_btn = ui.add(Button::new("🔄").text_style(TextStyle::Body));
+                                let refresh_btn = ui.add(Button::new(RichText::new("🔄").text_style(TextStyle::Body)));
                                 if refresh_btn.clicked()
                                 {
                                     if let Some(tx) = &self.app_tx
@@ -172,18 +162,18 @@ impl Headlines
                                         self.articles.clear();
                                         if let Err(e) = tx.send(Msg::Refresh)
                                         {
-                                            tracing::error!("Failed sending msg: {}", e);
+                                            tracing::error!("Failed sending refresh event: {}", e);
                                         }
                                     }
                                 }
 
                                 let theme_btn = ui
-                                    .add(Button::new({
+                                    .add(Button::new(RichText::new({
                                         if self.config.dark_mode
                                         { "🌞" }
                                         else
                                         { "🌙" }
-                                    }).text_style(TextStyle::Body));
+                                    }).text_style(TextStyle::Body)));
                                 if theme_btn.clicked()
                                 {
                                     self.config.dark_mode = !self.config.dark_mode;
@@ -197,10 +187,10 @@ impl Headlines
         );
     }
 
-    fn render_config(&mut self, ctx: &CtxRef)
+    fn render_config(&mut self, ctx: &Context)
     {
         CentralPanel::default().show(ctx,
-            |_ui|
+            |_|
             {
                 Window::new("Configuration").show(ctx,
                     |ui|
@@ -212,10 +202,7 @@ impl Headlines
                             self.api_key_initialized = true;
                             if let Some(tx) = &self.app_tx
                             {
-                                if let Err(e) = tx.send(Msg::APIKeySet(self.config.api_key.to_string()))
-                                {
-                                    tracing::error!("Failed sending msg: {}", e)
-                                }
+                                tx.send(Msg::APIKeySet(self.config.api_key.to_string())).expect("Failed sending APIKeySet event");
                             }
                             tracing::error!("API key set");
                         }
@@ -236,17 +223,103 @@ impl Headlines
                 Ok(news_data) => {
                     self.articles.push(news_data);
                 }
-                Err(e) => {
-                    tracing::warn!("Error receiving msg: {}", e);
-                }
+                Err(_) => {}
             }
         }
+    }
+
+    pub fn init(mut self, cc: &CreationContext) -> Self
+    {
+        if let Some(storage) = cc.storage
+        {
+            self.config = eframe::get_value(storage, APP_NAME).unwrap_or_default();
+            self.api_key_initialized = !self.config.api_key.is_empty();
+            tracing::info!(self.api_key_initialized);
+        }
+
+        let api_key = self.config.api_key.to_string();
+
+        #[cfg(not(target_arch = "wasm32"))]
+            let (mut news_tx, news_rx) = channel();
+        #[cfg(target_arch = "wasm32")]
+            let (news_tx, news_rx) = channel();
+
+        self.news_rx = Some(news_rx);
+
+        let (app_tx, app_rx) = sync_channel(1);
+        self.app_tx = Some(app_tx);
+
+        #[cfg(not(target_arch = "wasm32"))]
+        thread::spawn(
+            move ||
+                {
+                    if !api_key.is_empty()
+                    { fetch_news(&api_key, &mut news_tx); }
+                    else
+                    {
+                        loop
+                        {
+                            match app_rx.recv()
+                            {
+                                Ok(Msg::APIKeySet(api_key)) => {
+                                    fetch_news(&api_key, &mut news_tx);
+                                }
+                                Ok(Msg::Refresh) => {
+                                    fetch_news(&api_key, &mut news_tx);
+                                }
+                                Err(e) => {
+                                    tracing::error!("Failed receiving msg: {}", e);
+                                }
+                            }
+                        }
+                    }
+                }
+        );
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            let api_key_web = api_key.clone();
+            let news_tx_web = news_tx.clone();
+            gloo_timers::callback::Timeout::new(10,
+                move ||
+                {
+                    wasm_bindgen_futures::spawn_local(
+                        async
+                        {
+                            fetch_web(api_key_web, news_tx_web).await;
+                        }
+                    );
+                }
+            ).forget();
+
+            gloo_timers::callback::Interval::new(500,
+                move ||
+                {
+                    match app_rx.try_recv()
+                    {
+                        Ok(Msg::APIKeySet(api_key)) => {
+                            wasm_bindgen_futures::spawn_local(fetch_web(api_key.clone(), news_tx.clone()));
+                        }
+                        Ok(Msg::Refresh) => {
+                            wasm_bindgen_futures::spawn_local(fetch_web(api_key.clone(), news_tx.clone()));
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed receiving msg: {}", e);
+                        }
+                    }
+                }
+            ).forget();
+        }
+
+        self.configure_fonts(&cc.egui_ctx);
+
+        self
     }
 }
 
 impl App for Headlines
 {
-    fn update(&mut self, ctx: &CtxRef, frame: &mut Frame<'_>) {
+    fn update(&mut self, ctx: &Context, frame: &mut Frame) {
         ctx.request_repaint();
 
         if self.config.dark_mode
@@ -264,114 +337,24 @@ impl App for Headlines
             self.preload_articles();
 
             self.render_top_panel(ctx, frame);
+
+            render_footer(ctx);
+
             CentralPanel::default().show(ctx,
                 |ui|
                 {
                     render_header(ui);
-                    ScrollArea::auto_sized().show(ui,
+                    ScrollArea::vertical().show(ui,
                         |ui|
                         { self.render_news_cards(ui); }
                     );
-                    render_footer(ctx);
                 }
             );
         }
     }
 
-    fn setup(&mut self, ctx: &CtxRef, _frame: &mut Frame<'_>, storage: Option<&dyn Storage>)
-    {
-        if let Some(storage) = storage
-        {
-            self.config = eframe::epi::get_value(storage, "headlines").unwrap_or_default();
-            self.api_key_initialized = !self.config.api_key.is_empty();
-        }
-
-        let api_key = self.config.api_key.to_string();
-
-        #[cfg(not(target_arch = "wasm32"))]
-        let (mut news_tx, news_rx) = channel();
-        #[cfg(target_arch = "wasm32")]
-        let (news_tx, news_rx) = channel();
-
-        self.news_rx = Some(news_rx);
-
-        let (app_tx, app_rx) = sync_channel(1);
-        self.app_tx = Some(app_tx);
-
-        #[cfg(not(target_arch = "wasm32"))]
-        thread::spawn(
-            move ||
-            {
-                if !api_key.is_empty()
-                { fetch_news(&api_key, &mut news_tx); }
-                else
-                {
-                    loop
-                    {
-                        match app_rx.recv()
-                        {
-                            Ok(Msg::APIKeySet(api_key)) => {
-                                fetch_news(&api_key, &mut news_tx);
-                            }
-                            Ok(Msg::Refresh) => {
-                                fetch_news(&api_key, &mut news_tx);
-                            }
-                            Err(e) => {
-                                tracing::error!("Failed receiving msg: {}", e);
-                            }
-                        }
-                    }
-                }
-            }
-        );
-
-        #[cfg(target_arch = "wasm32")]
-        let api_key_web = api_key.clone();
-        #[cfg(target_arch = "wasm32")]
-        let news_tx_web = news_tx.clone();
-
-        #[cfg(target_arch = "wasm32")]
-        gloo_timers::callback::Timeout::new(10,
-            move ||
-            {
-                wasm_bindgen_futures::spawn_local(
-                    async
-                    {
-                        fetch_web(api_key_web, news_tx_web).await;
-                    }
-                );
-            }
-        ).forget();
-
-        #[cfg(target_arch = "wasm32")]
-        gloo_timers::callback::Interval::new(500,
-            move ||
-            {
-                match app_rx.try_recv()
-                {
-                    Ok(Msg::APIKeySet(api_key)) => {
-                        wasm_bindgen_futures::spawn_local(fetch_web(api_key.clone(), news_tx.clone()));
-                    }
-                    Ok(Msg::Refresh) => {
-                        wasm_bindgen_futures::spawn_local(fetch_web(api_key.clone(), news_tx.clone()));
-                    }
-                    Err(e) => {
-                        tracing::error!("Failed receiving msg: {}", e);
-                    }
-                }
-            }
-        ).forget();
-
-        self.configure_fonts(ctx);
-    }
-
     fn save(&mut self, storage: &mut dyn Storage) {
-        eframe::epi::set_value(storage, "headlines", &self.config);
-    }
-
-    fn name(&self) -> &str
-    {
-        "Headlines"
+        eframe::set_value(storage, "headlines", &self.config);
     }
 }
 
@@ -389,7 +372,7 @@ fn render_header(ui: &mut Ui)
     ui.add(sep);
 }
 
-fn render_footer(ctx: &CtxRef)
+fn render_footer(ctx: &Context)
 {
     TopBottomPanel::bottom("footer").show(ctx,
         |ui|
@@ -400,20 +383,22 @@ fn render_footer(ctx: &CtxRef)
                     ui.add_space(10.);
 
                     // api
-                    ui.add(Label::new("API source: newsapi.org").monospace());
+                    ui.add(Label::new(RichText::new("API source: newsapi.org").monospace()));
 
                     // egui
                     ui.add(
-                        Hyperlink::new("https://github.com/emilk/egui")
-                            .text("Made with egui")
-                            .text_style(TextStyle::Monospace)
+                        Hyperlink::from_label_and_url(
+                            RichText::new("Made with egui").text_style(TextStyle::Monospace),
+                            "https://github.com/emilk/egui"
+                        )
                     );
 
                     // github repo
                     ui.add(
-                        Hyperlink::new("https://github.com/celestomm/headlines")
-                            .text("celestomm/headlines")
-                            .text_style(TextStyle::Monospace)
+                        Hyperlink::from_label_and_url(
+                            RichText::new("celestomm/headlines").text_style(TextStyle::Monospace),
+                            "https://github.com/celestomm/headlines"
+                        )
                     );
 
                     ui.add_space(10.);
@@ -428,19 +413,7 @@ fn fetch_news(api_key: &str, news_tx: &mut Sender<NewsCardData>)
 {
     if let Ok(response) = NewsAPI::new(api_key).fetch()
     {
-        for article in response.articles()
-        {
-            let news = NewsCardData
-            {
-                title: article.title().to_string(),
-                desc: article.description().map(|s| s.to_string()).unwrap_or("...".to_string()),
-                url: article.url().to_string()
-            };
-            if let Err(e) = news_tx.send(news)
-            {
-                tracing::error!("Error sending news data: {}", e);
-            }
-        }
+        generate_news_card_data(&response, news_tx);
     }
     else
     {
@@ -453,22 +426,27 @@ async fn fetch_web(api_key: String, news_tx: Sender<NewsCardData>)
 {
     if let Ok(response) = NewsAPI::new(&api_key).fetch_web().await
     {
-        for article in response.articles()
-        {
-            let news = NewsCardData
-            {
-                title: article.title().to_string(),
-                desc: article.description().map(|s| s.to_string()).unwrap_or("...".to_string()),
-                url: article.url().to_string()
-            };
-            if let Err(e) = news_tx.send(news)
-            {
-                tracing::error!("Error sending news data: {}", e);
-            }
-        }
+        generate_news_card_data(&response, &news_tx);
     }
     else
     {
         tracing::error!("Failed fetching news");
+    }
+}
+
+fn generate_news_card_data(response: &NewsAPIResponse, news_tx: &Sender<NewsCardData>)
+{
+    for article in response.articles()
+    {
+        let news = NewsCardData
+        {
+            title: article.title().to_string(),
+            desc: article.description().map(|s| s.to_string()).unwrap_or("...".to_string()),
+            url: article.url().to_string()
+        };
+        if let Err(e) = news_tx.send(news)
+        {
+            tracing::error!("Error sending news data: {}", e);
+        }
     }
 }

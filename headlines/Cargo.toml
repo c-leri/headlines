@@ -10,7 +10,7 @@ eframe = { version = "0.19.0", features = ["persistence"] }
 serde = { version = "1.0.145", features = ["derive"] }
 tracing = "0.1.37"
 tracing-subscriber = "0.3.16"
-newsapi = { git = "git@github.com:celestomm/newsapi.git" }
+newsapi = { git = "ssh://git@github.com/celestomm/newsapi.git" }
 
 [lib]
 crate-type = ["cdylib", "rlib"]

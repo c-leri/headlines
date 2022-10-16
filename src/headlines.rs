@@ -322,6 +322,10 @@ impl App for Headlines {
     fn save(&mut self, storage: &mut dyn Storage) {
         eframe::set_value(storage, "headlines", &self.config);
     }
+
+    fn persist_native_window(&self) -> bool {
+        false
+    }
 }
 
 fn render_header(ui: &mut Ui) {

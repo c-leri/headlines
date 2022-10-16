@@ -3,6 +3,10 @@ name = "headlines"
 version = "0.1.0"
 edition = "2021"
 
+description = "A simple GUI news reader app"
+license = "MIT"
+authors = ["creativcoder", "celeri"]
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -19,3 +23,12 @@ crate-type = ["cdylib", "rlib"]
 tracing-wasm = "0.2.1"
 gloo-timers = "0.2.4"
 wasm-bindgen-futures = "0.4.33"
+
+[package.metadata.rpm]
+package = "headlines"
+
+[package.metadata.rpm.cargo]
+buildflags = ["--release"]
+
+[package.metadata.rpm.targets]
+headlines = { path = "/usr/bin/headlines" }

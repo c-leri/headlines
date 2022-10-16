@@ -4,7 +4,7 @@ use eframe::egui::{
     Visuals, Window,
 };
 use eframe::{App, CreationContext, Frame, Storage};
-use newsapi::{NewsAPI, NewsAPIResponse};
+use newsapi::{NewsAPI, NewsAPIResponse, Country};
 use serde::{Deserialize, Serialize};
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
 #[cfg(not(target_arch = "wasm32"))]
@@ -20,13 +20,14 @@ const APP_NAME: &str = "headlines";
 
 enum Msg {
     APIKeySet(String),
-    Refresh,
+    Refresh(Country),
 }
 
 #[derive(Serialize, Deserialize)]
 struct HeadlinesConfig {
     dark_mode: bool,
     api_key: String,
+    country: Country
 }
 
 impl Default for HeadlinesConfig {
@@ -34,6 +35,7 @@ impl Default for HeadlinesConfig {
         Self {
             dark_mode: true,
             api_key: String::new(),
+            country: Country::FR
         }
     }
 }
@@ -144,9 +146,7 @@ impl Headlines {
                     if refresh_btn.clicked() {
                         if let Some(tx) = &self.app_tx {
                             self.articles.clear();
-                            if let Err(e) = tx.send(Msg::Refresh) {
-                                tracing::error!("Failed sending refresh event: {}", e);
-                            }
+                            tx.send(Msg::Refresh(self.config.country)).expect("Failed sending refresh event");
                         }
                     }
 
@@ -162,6 +162,28 @@ impl Headlines {
                     ));
                     if theme_btn.clicked() {
                         self.config.dark_mode = !self.config.dark_mode;
+                    }
+
+                    let country_btn =
+                        ui.add(Button::new(RichText::new("🌐").text_style(TextStyle::Body)));
+                    if country_btn.clicked() {
+                        let country;
+                        match self.config.country {
+                            Country::US => { country = Country::FR; }
+                            Country::FR => { country = Country::US; }
+                        }
+                        self.config.country = country;
+
+                        if let Some(tx) = &self.app_tx {
+                            self.articles.clear();
+                            tx.send(Msg::Refresh(country)).expect("Failed sending refresh event");
+                        }
+                    }
+
+                    let settings_btn =
+                        ui.add(Button::new(RichText::new("🛠").text_style(TextStyle::Body)));
+                    if settings_btn.clicked() {
+                        self.api_key_initialized = !self.api_key_initialized;
                     }
                 });
             });
@@ -180,7 +202,7 @@ impl Headlines {
                         tx.send(Msg::APIKeySet(self.config.api_key.to_string()))
                             .expect("Failed sending APIKeySet event");
                     }
-                    tracing::error!("API key set");
+                    tracing::info!("API key set");
                 }
                 ui.label("If you haven't registered for the API key, head over to");
                 ui.hyperlink("https://newsapi.org");
@@ -221,19 +243,18 @@ impl Headlines {
         #[cfg(not(target_arch = "wasm32"))]
         thread::spawn(move || {
             if !api_key.is_empty() {
-                fetch_news(&api_key, &mut news_tx);
-            } else {
-                loop {
-                    match app_rx.recv() {
-                        Ok(Msg::APIKeySet(api_key)) => {
-                            fetch_news(&api_key, &mut news_tx);
-                        }
-                        Ok(Msg::Refresh) => {
-                            fetch_news(&api_key, &mut news_tx);
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed receiving msg: {}", e);
-                        }
+                fetch_news(&api_key, self.config.country, &mut news_tx);
+            }
+            loop {
+                match app_rx.recv() {
+                    Ok(Msg::APIKeySet(api_key)) => {
+                        fetch_news(&api_key, self.config.country, &mut news_tx);
+                    }
+                    Ok(Msg::Refresh(country)) => {
+                        fetch_news(&api_key, country, &mut news_tx);
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed receiving msg: {}", e);
                     }
                 }
             }
@@ -244,18 +265,18 @@ impl Headlines {
             let api_key_web = api_key.clone();
             let news_tx_web = news_tx.clone();
             gloo_timers::callback::Timeout::new(10, move || {
-                wasm_bindgen_futures::spawn_local(async {
-                    fetch_web(api_key_web, news_tx_web).await;
+                wasm_bindgen_futures::spawn_local(async move {
+                    fetch_web(api_key_web, self.config.country, news_tx_web).await;
                 });
             })
             .forget();
 
             gloo_timers::callback::Interval::new(500, move || match app_rx.try_recv() {
                 Ok(Msg::APIKeySet(api_key)) => {
-                    wasm_bindgen_futures::spawn_local(fetch_web(api_key.clone(), news_tx.clone()));
+                    wasm_bindgen_futures::spawn_local(fetch_web(api_key.clone(), self.config.country, news_tx.clone()));
                 }
-                Ok(Msg::Refresh) => {
-                    wasm_bindgen_futures::spawn_local(fetch_web(api_key.clone(), news_tx.clone()));
+                Ok(Msg::Refresh(country)) => {
+                    wasm_bindgen_futures::spawn_local(fetch_web(api_key.clone(), country, news_tx.clone()));
                 }
                 Err(e) => {
                     tracing::error!("Failed receiving msg: {}", e);
@@ -340,8 +361,8 @@ fn render_footer(ctx: &Context) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn fetch_news(api_key: &str, news_tx: &mut Sender<NewsCardData>) {
-    if let Ok(response) = NewsAPI::new(api_key).fetch() {
+fn fetch_news(api_key: &str, country: Country, news_tx: &mut Sender<NewsCardData>) {
+    if let Ok(response) = NewsAPI::new(api_key).country(country).fetch() {
         generate_news_card_data(&response, news_tx);
     } else {
         tracing::error!("Failed fetching news");
@@ -349,8 +370,8 @@ fn fetch_news(api_key: &str, news_tx: &mut Sender<NewsCardData>) {
 }
 
 #[cfg(target_arch = "wasm32")]
-async fn fetch_web(api_key: String, news_tx: Sender<NewsCardData>) {
-    if let Ok(response) = NewsAPI::new(&api_key).fetch_web().await {
+async fn fetch_web(api_key: String, country: Country, news_tx: Sender<NewsCardData>) {
+    if let Ok(response) = NewsAPI::new(&api_key).country(country).fetch_web().await {
         generate_news_card_data(&response, &news_tx);
     } else {
         tracing::error!("Failed fetching news");

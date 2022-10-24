@@ -1,4 +1,5 @@
 /target
-.idea/workspace.xml
+.idea
 webapp/headlines.js
 webapp/headlines_bg.wasm
+.rpm

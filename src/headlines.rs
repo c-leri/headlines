@@ -355,8 +355,8 @@ fn render_footer(ctx: &Context) {
 
             // github repo
             ui.add(Hyperlink::from_label_and_url(
-                RichText::new("celestomm/headlines").text_style(TextStyle::Monospace),
-                "https://github.com/celestomm/headlines",
+                RichText::new("c-leri/headlines").text_style(TextStyle::Monospace),
+                "https://github.com/c-leri/headlines",
             ));
 
             ui.add_space(10.);

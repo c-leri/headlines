@@ -1,6 +1,6 @@
 [package]
 name = "headlines"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 
 description = "A simple GUI news reader app"
@@ -24,11 +24,7 @@ tracing-wasm = "0.2.1"
 gloo-timers = "0.2.4"
 wasm-bindgen-futures = "0.4.33"
 
-[package.metadata.rpm]
-package = "headlines"
-
-[package.metadata.rpm.cargo]
-buildflags = ["--release"]
-
-[package.metadata.rpm.targets]
-headlines = { path = "/usr/bin/headlines" }
+[package.metadata.generate-rpm]
+assets = [
+  { source = "target/release/headlines", dest = "/usr/bin/headlines", mode = "755" }
+]
